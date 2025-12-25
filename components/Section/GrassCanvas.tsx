@@ -1,0 +1,54 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import React, { useRef, useEffect } from 'react';
+import { GrassEngine, GrassConfig } from '../Core/Three/GrassEngine.tsx';
+
+interface GrassCanvasProps {
+  config: GrassConfig;
+}
+
+const GrassCanvas: React.FC<GrassCanvasProps> = ({ config }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const engineRef = useRef<GrassEngine | null>(null);
+
+  useEffect(() => {
+    if (containerRef.current && !engineRef.current) {
+      // Initialize Engine with initial config
+      engineRef.current = new GrassEngine(containerRef.current, config);
+    }
+
+    return () => {
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
+    };
+  }, []); // Run once on mount to setup engine
+
+  // Reactively update config when props change
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.updateConfig(config);
+    }
+  }, [config]); 
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 0, // Behind content
+        overflow: 'hidden',
+        pointerEvents: 'auto' // Allow OrbitControls to work
+      }}
+    />
+  );
+};
+
+export default GrassCanvas;
