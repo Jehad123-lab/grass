@@ -8,26 +8,15 @@ import ThemeToggleButton from '../Core/ThemeToggleButton.tsx';
 import GrassCanvas from '../Section/GrassCanvas.tsx';
 import ControlPanel from '../Section/ControlPanel.tsx';
 import { GrassConfig } from '../Core/Three/GrassEngine.tsx';
+import { GRASS_BIOMES } from '../Data/GrassBiomes.ts';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Welcome = () => {
   const { theme } = useTheme();
   const [isControlOpen, setIsControlOpen] = useState(true);
 
-  // Initial Configuration (Default Green)
-  const [grassConfig, setGrassConfig] = useState<GrassConfig>({
-    bladeCount: 30000,
-    bladeWidth: 0.12,
-    bladeHeight: 1.2,
-    windSpeed: 1.0,
-    windStrength: 0.7,
-    baseColor: '#0a2e0a', // Dark Green
-    tipColor: '#4caf50',  // Vivid Green
-    sunElevation: 45,
-    sunAzimuth: -30,
-    sunIntensity: 3.0,
-    sunColor: '#ffffff'
-  });
+  // Initial Configuration (Default to Golden Fields)
+  const [grassConfig, setGrassConfig] = useState<GrassConfig>(GRASS_BIOMES['Golden Fields']);
 
   const styles: { [key: string]: React.CSSProperties } = {
     container: {
@@ -36,7 +25,8 @@ const Welcome = () => {
       flexDirection: 'column',
       height: '100%',
       width: '100%',
-      backgroundColor: theme.Color.Base.Surface[1], 
+      // Warm Sky Gradient
+      background: 'linear-gradient(to bottom, #729FCF 0%, #FFEFD5 80%, #E6C25B 100%)', 
       overflow: 'hidden',
     },
     dock: {
