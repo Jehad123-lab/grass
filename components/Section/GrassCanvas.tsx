@@ -2,16 +2,46 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { GrassEngine, GrassConfig } from '../Core/Three/GrassEngine.tsx';
 
 interface GrassCanvasProps {
   config: GrassConfig;
 }
 
-const GrassCanvas: React.FC<GrassCanvasProps> = ({ config }) => {
+export interface GrassCanvasHandle {
+  enterFPS: () => void;
+  setMobileFPS: (active: boolean) => void;
+  setJoystickInput: (x: number, y: number) => void;
+  rotateCamera: (movementX: number, movementY: number) => void;
+}
+
+const GrassCanvas = forwardRef<GrassCanvasHandle, GrassCanvasProps>(({ config }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GrassEngine | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    enterFPS: () => {
+      if (engineRef.current) {
+        engineRef.current.enterFirstPerson();
+      }
+    },
+    setMobileFPS: (active: boolean) => {
+      if (engineRef.current) {
+        engineRef.current.setMobileFPS(active);
+      }
+    },
+    setJoystickInput: (x: number, y: number) => {
+      if (engineRef.current) {
+        engineRef.current.setJoystickInput(x, y);
+      }
+    },
+    rotateCamera: (mx: number, my: number) => {
+      if (engineRef.current) {
+        engineRef.current.rotateCamera(mx, my);
+      }
+    }
+  }));
 
   useEffect(() => {
     if (containerRef.current && !engineRef.current) {
@@ -49,6 +79,6 @@ const GrassCanvas: React.FC<GrassCanvasProps> = ({ config }) => {
       }}
     />
   );
-};
+});
 
 export default GrassCanvas;

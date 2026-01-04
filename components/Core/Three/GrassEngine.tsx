@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { vertexShader, fragmentShader, particleVertexShader, particleFragmentShader, foliageVertexShader, foliageFragmentShader } from './Shaders.tsx';
 import { randomRange, noise2D } from '../../../utils/math.tsx';
 
@@ -201,6 +202,7 @@ export class GrassEngine {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private controls: OrbitControls;
+  private fpsControls: PointerLockControls;
   private clock: THREE.Clock;
   private sunLight: THREE.DirectionalLight;
   private ambientLight: THREE.AmbientLight;
@@ -226,6 +228,20 @@ export class GrassEngine {
   
   private frameId: number | null = null;
   private currentConfig: GrassConfig;
+
+  // FPS State
+  private isFPS: boolean = false;
+  private isMobileFPS: boolean = false; // Separate state for mobile without pointer lock
+  private moveForward = false;
+  private moveBackward = false;
+  private moveLeft = false;
+  private moveRight = false;
+  private joystickVector = new THREE.Vector3(); // x (left/right), z (forward/back)
+
+  private velocity = new THREE.Vector3();
+  private direction = new THREE.Vector3();
+  private playerHeight = 1.8;
+  private playerSpeed = 30.0;
 
   private readonly CHUNK_SIZE = 30;
   private readonly BASE_MAX_DISTANCE = LOD_LEVELS[LOD_LEVELS.length - 1].distance; 
@@ -253,6 +269,7 @@ export class GrassEngine {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
+    // Orbit Controls (Default)
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enablePan = true; 
     this.controls.maxPolarAngle = Math.PI / 2 - 0.05;
@@ -260,6 +277,12 @@ export class GrassEngine {
     this.controls.maxDistance = 200;
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
+
+    // FPS Controls
+    this.fpsControls = new PointerLockControls(this.camera, document.body);
+    // Ensure rotation order is YXZ for proper FPS camera behavior
+    this.camera.rotation.order = 'YXZ'; 
+    this.setupFPSListeners();
 
     this.ambientLight = new THREE.AmbientLight(0xffffff, config.ambientIntensity);
     this.scene.add(this.ambientLight);
@@ -299,6 +322,147 @@ export class GrassEngine {
     window.addEventListener('resize', this.onResize);
     this.animate();
   }
+
+  // --- FPS LOGIC ---
+
+  private setupFPSListeners() {
+    this.fpsControls.addEventListener('lock', () => {
+        this.isFPS = true;
+        this.controls.enabled = false;
+        // Reset player velocity
+        this.velocity.set(0, 0, 0);
+    });
+
+    this.fpsControls.addEventListener('unlock', () => {
+        this.isFPS = false;
+        this.controls.enabled = true;
+    });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+        if (!this.isFPS && !this.isMobileFPS) return;
+        switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW': this.moveForward = true; break;
+            case 'ArrowLeft':
+            case 'KeyA': this.moveLeft = true; break;
+            case 'ArrowDown':
+            case 'KeyS': this.moveBackward = true; break;
+            case 'ArrowRight':
+            case 'KeyD': this.moveRight = true; break;
+        }
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+        if (!this.isFPS && !this.isMobileFPS) return;
+        switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW': this.moveForward = false; break;
+            case 'ArrowLeft':
+            case 'KeyA': this.moveLeft = false; break;
+            case 'ArrowDown':
+            case 'KeyS': this.moveBackward = false; break;
+            case 'ArrowRight':
+            case 'KeyD': this.moveRight = false; break;
+        }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+  }
+
+  public enterFirstPerson() {
+      this.snapToGround();
+      this.fpsControls.lock();
+  }
+
+  public setMobileFPS(active: boolean) {
+      this.isMobileFPS = active;
+      if (active) {
+          this.controls.enabled = false;
+          this.snapToGround();
+          this.velocity.set(0, 0, 0);
+      } else {
+          this.controls.enabled = true;
+          // Clean up vector
+          this.joystickVector.set(0,0,0);
+      }
+  }
+
+  public setJoystickInput(x: number, y: number) {
+      // x is left/right, y is up/down (which maps to forward/back)
+      // Standard Joystick: Up is negative Y in screen space usually, but Joystick component gives normalized.
+      // Joystick Y: -1 (Up) to 1 (Down).
+      // 3D Space: Forward is negative Z (usually) relative to camera.
+      this.joystickVector.set(x, 0, y);
+  }
+
+  public rotateCamera(movementX: number, movementY: number) {
+      if (!this.isMobileFPS) return;
+      const sensitivity = 0.002;
+      
+      // Yaw (World Y) - Rotation around global Up
+      this.camera.rotation.y -= movementX * sensitivity;
+      
+      // Pitch (Local X) - Rotation around local Right
+      this.camera.rotation.x -= movementY * sensitivity;
+
+      // Clamp Pitch
+      const PI_2 = Math.PI / 2;
+      this.camera.rotation.x = Math.max( - PI_2, Math.min( PI_2, this.camera.rotation.x ) );
+  }
+
+  private snapToGround() {
+      const currentPos = this.camera.position;
+      const terrainH = this.getTerrainHeight(currentPos.x, currentPos.z);
+      if (currentPos.y > terrainH + 50) {
+          this.camera.position.y = terrainH + this.playerHeight;
+      }
+  }
+
+  private updatePlayer(delta: number) {
+      if (!this.fpsControls.isLocked && !this.isMobileFPS) return;
+
+      // Friction
+      this.velocity.x -= this.velocity.x * 10.0 * delta;
+      this.velocity.z -= this.velocity.z * 10.0 * delta;
+
+      // Input Direction
+      // Keyboard Input (Binary)
+      const kZ = Number(this.moveForward) - Number(this.moveBackward);
+      const kX = Number(this.moveRight) - Number(this.moveLeft);
+
+      // Joystick Input (Analog)
+      // Joystick Y: Up is negative. In 3D moveForward (negative Z).
+      // So pushing joystick Up (negative) should mean move Forward (negative).
+      // So we add them directly if Joystick Up is < 0.
+      const jZ = this.joystickVector.z; 
+      const jX = this.joystickVector.x;
+
+      this.direction.z = kZ - jZ; // Invert joystick Z because Up (-1) means Forward (+1 in logic before negation)
+      this.direction.x = kX + jX;
+      
+      // Normalize if length > 1 to prevent super speed, but keep analog subtlety
+      if (this.direction.lengthSq() > 1) this.direction.normalize();
+
+      if (this.direction.z !== 0) this.velocity.z -= this.direction.z * this.playerSpeed * 10.0 * delta;
+      if (this.direction.x !== 0) this.velocity.x -= this.direction.x * this.playerSpeed * 10.0 * delta;
+
+      // Apply Movement (Side / Forward relative to Camera look)
+      // fpsControls.moveRight/Forward works by using camera's local vectors
+      // We can use same math manually if needed, but fpsControls helper is useful even if not locked?
+      // Actually fpsControls methods rely on the camera object it holds.
+      
+      this.fpsControls.moveRight(-this.velocity.x * delta);
+      this.fpsControls.moveForward(-this.velocity.z * delta);
+
+      // Terrain Collision / Height Snap
+      const camPos = this.camera.position;
+      const terrainHeight = this.getTerrainHeight(camPos.x, camPos.z);
+      
+      this.camera.position.y = terrainHeight + this.playerHeight;
+  }
+
+  // --- EXISTING LOGIC ---
 
   private getTerrainHeight(x: number, z: number): number {
     let y = noise2D(x * 0.01, z * 0.01) * 12;
@@ -941,7 +1105,11 @@ export class GrassEngine {
   private animate = () => {
     this.frameId = requestAnimationFrame(this.animate);
     
+    const delta = this.clock.getDelta();
     const time = this.clock.getElapsedTime();
+    
+    this.updatePlayer(delta);
+
     const camPos = this.camera.position;
 
     if (this.grassMaterial && this.grassMaterial.uniforms) {
@@ -961,7 +1129,7 @@ export class GrassEngine {
     
     this.updateChunks(); 
 
-    this.controls.update();
+    if (this.controls.enabled) this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -970,6 +1138,7 @@ export class GrassEngine {
     if (this.frameId) cancelAnimationFrame(this.frameId);
     this.renderer.dispose();
     this.controls.dispose();
+    this.fpsControls.dispose();
     
     if (this.sunMesh) {
       this.sunMesh.geometry.dispose();
